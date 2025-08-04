@@ -71,6 +71,7 @@ def main(args):
 
     key_points_xyz = points_frame_0[key_indices]
     key_points_rgb = colors_frame_0[key_indices]  # Also get colors for key points
+    key_points_ids = key_indices
 
     final_representative_frames = [{'xyz': key_points_xyz, 'rgb': key_points_rgb}]
 
@@ -87,17 +88,24 @@ def main(args):
 
         # newly_added_xyz, newly_added_rgb = find_new_points(current_frame, previous_frame)
         num_prev_frame = previous_frame['xyz'].shape[0]
+        # print(num_prev_frame)
         newly_added_xyz = current_frame['xyz'][num_prev_frame:]
         newly_added_rgb = current_frame['rgb'][num_prev_frame:]
+        newly_added_id = np.arange(num_prev_frame, original_pcl.shape[0])
 
         if len(newly_added_xyz) > 0:
-            point_cache.append((newly_added_xyz, newly_added_rgb))
+            point_cache.append((newly_added_xyz, newly_added_rgb, newly_added_id))
 
         num_cached_points = sum(len(p[0]) for p in point_cache)
 
         if num_cached_points > args.cache_threshold:
-            all_cached_xyz = np.vstack([xyz for xyz, rgb in point_cache])
-            all_cached_rgb = np.vstack([rgb for xyz, rgb in point_cache])
+
+            # all_cached_xyz = np.vstack([xyz for xyz, rgb in point_cache])
+            # all_cached_rgb = np.vstack([rgb for xyz, rgb in point_cache])
+
+            all_cached_xyz = point_cache[0][0]
+            all_cached_rgb = point_cache[0][1]
+            all_cached_ids = point_cache[0][2]
 
             genuinely_new_mask = np.ones(len(all_cached_xyz), dtype=bool)
             for j, point_c in enumerate(all_cached_xyz):
@@ -109,6 +117,9 @@ def main(args):
 
             genuinely_new_points = all_cached_xyz[genuinely_new_mask]
             genuinely_new_colors = all_cached_rgb[genuinely_new_mask]
+            genuinely_new_ids = all_cached_ids[genuinely_new_mask]
+
+            # pdb.set_trace()
 
             if len(genuinely_new_points) > 0:
                 new_rep_indices = radius_based_clustering(
@@ -116,13 +127,20 @@ def main(args):
                 )
 
                 if len(new_rep_indices) > 0:
-                    new_key_points_xyz = genuinely_new_points[new_rep_indices]
-                    new_key_points_rgb = genuinely_new_colors[new_rep_indices]
+                    # new_key_points_xyz = genuinely_new_points[new_rep_indices]
+                    # new_key_points_rgb = genuinely_new_colors[new_rep_indices]
 
-                    # Add new representatives to the main set
-                    key_points_xyz = np.vstack([key_points_xyz, new_key_points_xyz])
-                    key_points_rgb = np.vstack([key_points_rgb, new_key_points_rgb])
-                    print(f"Frame {i}: Added {len(new_key_points_xyz)} new representative points. Total is now {len(key_points_xyz)}.")
+                    # # Add new representatives to the main set
+                    # key_points_xyz = np.vstack([key_points_xyz, new_key_points_xyz])
+                    # key_points_rgb = np.vstack([key_points_rgb, new_key_points_rgb])
+
+                    # print(f"Frame {i}: Added {len(new_key_points_xyz)} new representative points. Total is now {len(key_points_xyz)}.")
+
+                    new_key_points_ids = genuinely_new_ids[new_rep_indices]
+                    key_points_ids = np.hstack((key_points_ids, new_key_points_ids))
+                    print(f"Frame {i}: Added {len(new_key_points_ids)} new representative points. Total is now {len(key_points_ids)}.")
+
+                    # pdb.set_trace()
 
             point_cache = []
 
@@ -130,15 +148,11 @@ def main(args):
         if i == 1:
             pl = pv.Plotter()
 
-            pv_points = pv.PolyData(original_pcl)
-            pv_points['colors'] = original_rgb
-
-            pv_pbd_points = pv.PolyData(key_points_xyz)
-
-            pdb.set_trace()
-
+            # Build PolyData
+            pl_cloud = pv.PolyData(original_pcl)
+            pl_cloud['colors'] = original_rgb
             pl.add_points(
-                pv_points,
+                pl_cloud,
                 style='points',
                 scalars='colors',
                 # scalars=original_rgb,
@@ -146,51 +160,51 @@ def main(args):
                 render_points_as_spheres=False,
                 point_size=10
             )
+
+            curr_key_points = original_pcl[key_points_ids]
+            pl_pbd_pts = pv.PolyData(curr_key_points)
+            # num_keys_frame0 = len(curr_key_points)
+            color_keys_f_zero = np.tile(np.array([240, 139, 81]) / 255, (len(curr_key_points), 1))
+            pl_pbd_pts['colors_key_pts'] = color_keys_f_zero
+
+            # pdb.set_trace()
+
             pl.add_points(
-                pv_pbd_points,
+                pl_pbd_pts,
                 style='points',
-                color='#FF7A30',
-                # scalars=original_rgb,
-                # rgb=True,
+                # color='#FF7A30',
+                scalars='colors_key_pts',
+                rgb=True,
                 render_points_as_spheres=True,
-                point_size=20
+                point_size=30
             )
             pl.camera_position = [(0.7947078067451492, 2.269401432933786, 5.384683407459932),
                                   (-0.11845957580527006, -0.33262403076562275, 1.3366592629450953),
                                   (-0.03155330752957934, -0.8375329894822626, 0.545474912633797)]
             # pl.show(interactive_update=False)
             pl.show(interactive_update=True)
+
             # pdb.set_trace()
 
         else:
-            # if len(point_cache) > 0:
-            # pv_points.points = original_pcl
-            # pv_points['colors'] = original_rgb
-            # print(pv_points.points.shape)
 
-            # pv_pbd_points.points = key_points_xyz
+            num_pcl = original_pcl.shape[0]
+            pl_cloud.verts = np.c_[np.ones(num_pcl, dtype=np.int64), np.arange(num_pcl)].flatten()
+            pl_cloud.points = original_pcl
+            pl_cloud['colors'] = original_rgb
 
-            pl.add_points(
-                newly_added_xyz,
-                scalars=newly_added_rgb,
-                style='points',
-                rgb=True,
-                render_points_as_spheres=False,
-                point_size=10
-            )
+            num_key_pts = len(key_points_ids)
+            pl_pbd_pts.verts = np.c_[np.ones(num_key_pts, dtype=np.int64), np.arange(num_key_pts)].flatten()
+            pl_pbd_pts.points = original_pcl[key_points_ids]
+            color_added_keys = np.tile(np.array([138, 166, 36]) / 255, (num_key_pts - len(color_keys_f_zero), 1))
+            all_colors = np.vstack((color_keys_f_zero, color_added_keys))
+            pl_pbd_pts['colors_key_pts'] = all_colors
 
-            pl.add_points(
-                new_key_points_xyz,
-                color='#386641',
-                style='points',
-                # rgb=True,
-                render_points_as_spheres=True,
-                point_size=20
-            )
+            # pdb.set_trace()
+
+            pl.render()
 
         time.sleep(0.2)
-
-        # pdb.set_trace()
 
         # pdb.set_trace()
 
@@ -205,6 +219,7 @@ def main(args):
 
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser(description="Intelligently downsample a point cloud sequence while retaining RGB color.")
     parser.add_argument("--input_path", type=str,
                         default="/home/fei/Documents/Dataset/StereoMIS_P3_1_tracking_full_with_projections_2/StereoMIS_P3_1_tracking_full/all_frames_gaussians.pkl", help="Path to the input .pkl file.")
